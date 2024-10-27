@@ -33,8 +33,8 @@
 #include <stdint.h>
 #include "stm32h7xx.h"
 
-#define BL_BOOT_BASE          (FLASH_BASE)
-#define BL_BOOT_SIZE          (uint32_t)(0x6000U)
+#define BL_FLASH_BASE         (FLASH_BANK1_BASE)
+#define BL_FLASH_SIZE         (FLASH_SECTOR_SIZE)
 #define BL_STAMP_BASE         (BL_BOOT_BASE + BL_BOOT_SIZE - 4)
 #define BL_STAMP              (uint32_t)(0xDEADBEEF)
 #define BL_APPLICATION_BASE   (uint32_t)(BL_BOOT_BASE + BL_BOOT_SIZE)
@@ -43,7 +43,7 @@
 typedef enum{
 	BL_STATE_FAULT,
 	BL_STATE_SYNC,
-	BL_STATE_FW_DEVICE,
+	BL_STATE_FW_INIT,
 	BL_STATE_FW_UPDATE,
 	BL_STATE_FW_COMPLETE,
 }BL_State_e;
@@ -52,10 +52,10 @@ void bootLaunch(void);
 void bootTask(void);
 
 void bootSync(void);
-void bootDeviceID(void);
+void bootFirmwareInit(void);
 void bootFirmwareUpdate(void);
-void bootErase(void);
-void bootLoad(uint8_t* payload, uint8_t len);
+int8_t bootFirmwareErase(void);
+int8_t bootLoad(uint8_t* payload, uint8_t len);
 
 int8_t bootGetStamp(void);
 void bootSetStamp(void);

@@ -36,6 +36,10 @@
 /// SYSDEBUG ////////////////////////////////////////////////
 #define SERIAL_UART            uart2
 
+/// BOOTLOADER //////////////////////////////////////////////
+#define COM_UART               uart2
+#define DEVICE_ID              (0x0F35U)
+
 /// LED /////////////////////////////////////////////////////
 #define LED1_PIN               PE11
 #define LED2_PIN               PE10

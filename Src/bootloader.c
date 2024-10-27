@@ -36,8 +36,6 @@
 #include "bootloader.h"
 #include "com.h"
 
-#define DEVICE_ID  (uint16_t)(0x0F99U)
-
 static BL_State_e  state;
 static uint32_t    fwIndex;
 static comPacket_t rxPacket;
@@ -65,7 +63,7 @@ void bootTask(void){
 	switch (state) {
 		case BL_STATE_FAULT:     bootFault(); break;
 		case BL_STATE_SYNC:      bootSync(); break;
-		case BL_STATE_FW_DEVICE: bootDeviceID(); break;
+		case BL_STATE_FW_INIT:   bootFirmwareInit(); break;
 		case BL_STATE_FW_UPDATE: bootFirmwareUpdate(); break;
 		case BL_STATE_FW_COMPLETE: default: bootJumpApp(); break;
 	}
@@ -74,18 +72,25 @@ void bootTask(void){
 void bootSync(void){
 	while(comReadCmd(COM_SYC) != OK);
 	comWriteCmd(COM_ACK);
-	state = BL_STATE_FW_DEVICE;
+	state = BL_STATE_FW_INIT;
 }
 
-void bootDeviceID(void){
+void bootFirmwareInit(void){
 	if(comFReadPacket(&rxPacket, 0) != OK){
 		state = BL_STATE_FAULT; return;
 	}
 
 	if(rxPacket.type == COM_IDD && *(uint16_t*)rxPacket.payload == DEVICE_ID){
-		comWriteCmd(COM_ACK);
-		FW_INDEX = 0;
-		BL_STATE = BL_STATE_FW_UPDATE;
+		/* Erase all Flash Sectors */
+		if(bootFirmwareErase() == OK){
+			fwIndex = 0;
+			state = BL_STATE_FW_UPDATE;
+			comWriteCmd(COM_ACK);
+		}
+		else{
+			state = BL_STATE_FAULT;
+			comWriteCmd(COM_ERR);
+		}
 	}
 	else comWriteCmd(COM_ERR);
 }
@@ -107,17 +112,46 @@ void bootFirmwareUpdate(void){
 	comWriteCmd(COM_ACK);
 }
 
-void bootErase(void){
-	/* Erase Program Area */
+int8_t bootFirmwareErase(void){
+    FLASH_EraseInitTypeDef EraseInitStruct;
+    uint32_t SectorError = 0;
+
+    if(HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
+
+    EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
+    EraseInitStruct.Banks = FLASH_BANK_1;               /* Bank 1 */
+    EraseInitStruct.Sector = FLASH_SECTOR_1;            /* Start sector to be erased. */
+    EraseInitStruct.NbSectors = FLASH_SECTOR_TOTAL - 1; /* Number of sectors to be erased. */
+    EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+
+    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
+        HAL_FLASH_Lock();
+        return E_ERROR;
+    }
+
+    EraseInitStruct.Banks = FLASH_BANK_2;
+    EraseInitStruct.Sector = FLASH_SECTOR_0;  /* First Sector */
+    EraseInitStruct.NbSectors = 4; 			  /* Total number of sectors in Bank 2. */
+
+    if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
+        HAL_FLASH_Lock();
+        return E_ERROR;
+    }
+
+    HAL_FLASH_Lock();
+    return OK;
 }
 
-void bootLoad(uint8_t* payload, uint8_t len){
-	HAL_FLASH_Unlock();
+int8_t bootLoad(uint8_t* payload, uint8_t len){
+
+	if(HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
+
 	__IO uint32_t* firmware = (__IO uint32_t*)fwIndex;
 
 
 	HAL_FLASH_Lock();
 	fwIndex += len;
+    return OK;
 }
 
 
@@ -127,10 +161,9 @@ int8_t bootGetStamp(void){
 	return E_NOT_FOUND;
 }
 
+/* Preerase Needed */
 void bootSetStamp(void){
 	HAL_FLASH_Unlock();
-	FLASH_EraseInitTypeDef EraseInitStruct;
-
 	__IO uint32_t* pStamp = (__IO uint32_t*)BL_STAMP_BASE;
 	*pStamp = BL_STAMP;
 	HAL_FLASH_Lock();

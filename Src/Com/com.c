@@ -28,10 +28,9 @@
  */
 
 #include <string.h>
+#include "sysconfig.h"
 #include "com.h"
-
 #include "uart.h"
-#define COM_UART uart2
 
 comPacket_t comNewPacket(uint8_t type, uint8_t len, uint8_t* pBuf){
 	comPacket_t pk = {.type = type,.len = len};
