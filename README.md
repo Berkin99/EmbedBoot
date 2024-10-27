@@ -1,2 +1,2 @@
 # EmbedBoot
-EmbedLink Secure Bootloader Application For OTA Frimware Update
+EmbedLink Secure Bootloader Application For OTA Firmware Update

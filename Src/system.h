@@ -34,6 +34,5 @@
 #include "main.h"
 
 void systemLaunch(void);
-void systemErrorCall(void);
 
 #endif /* SYSTEM_H_ */

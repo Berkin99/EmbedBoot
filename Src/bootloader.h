@@ -30,13 +30,35 @@
 #ifndef BOOTLOADER_H_
 #define BOOTLOADER_H_
 
-#define BOOTLOADER_ORIGIN  (uint32_t) 0x08000000
-#define BOOTLOADER_MEMORY  (uint32_t) 0x00004000
-#define BOOT_LED 		    LED1_PIN
+#include <stdint.h>
+#include "stm32h7xx.h"
 
-void bootInit(void);
-void bootSequence(void);
-uint8_t bootCheck(void);
-void bootApplication(void);
+#define BL_BOOT_BASE          (FLASH_BASE)
+#define BL_BOOT_SIZE          (uint32_t)(0x6000U)
+#define BL_STAMP_BASE         (BL_BOOT_BASE + BL_BOOT_SIZE - 4)
+#define BL_STAMP              (uint32_t)(0xDEADBEEF)
+#define BL_APPLICATION_BASE   (uint32_t)(BL_BOOT_BASE + BL_BOOT_SIZE)
+#define BL_APPLICATION_SIZE   (uint32_t)(0x1EE000U)
+
+typedef enum{
+	BL_STATE_FAULT,
+	BL_STATE_SYNC,
+	BL_STATE_FW_DEVICE,
+	BL_STATE_FW_UPDATE,
+	BL_STATE_FW_COMPLETE,
+}BL_State_e;
+
+void bootLaunch(void);
+void bootTask(void);
+
+void bootSync(void);
+void bootDeviceID(void);
+void bootFirmwareUpdate(void);
+void bootErase(void);
+void bootLoad(uint8_t* payload, uint8_t len);
+
+int8_t bootGetStamp(void);
+void bootSetStamp(void);
+void bootJumpApp(void);
 
 #endif /* BOOTLOADER_H_ */

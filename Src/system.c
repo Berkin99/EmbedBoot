@@ -28,18 +28,9 @@
  */
 
 #include "system.h"
-#include "systime.h"
-#include "sysconfig.h"
 #include "uart.h"
-#include "bootloader.h"
 
 void systemLaunch(void){
-	uartInit();
-	bootInit();
-    /* Should not reach here */
+    uartInit();
     while(1);
-}
-
-void systemErrorCall(void){
-    while(1){}
 }

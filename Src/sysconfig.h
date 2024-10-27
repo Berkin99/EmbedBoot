@@ -30,8 +30,6 @@
 #ifndef SYSCONFIG_H_
 #define SYSCONFIG_H_
 
-#include "system.h"
-
 /// SYSTIME /////////////////////////////////////////////////
 #define SYSTIME                htim2
 
