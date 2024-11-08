@@ -35,10 +35,13 @@
 
 #define BL_FLASH_BASE         (FLASH_BANK1_BASE)
 #define BL_FLASH_SIZE         (FLASH_SECTOR_SIZE)
-#define BL_STAMP_BASE         (BL_BOOT_BASE + BL_BOOT_SIZE - 4)
-#define BL_STAMP              (uint32_t)(0xDEADBEEF)
-#define BL_APPLICATION_BASE   (uint32_t)(BL_BOOT_BASE + BL_BOOT_SIZE)
-#define BL_APPLICATION_SIZE   (uint32_t)(0x1EE000U)
+#define BL_STAMP_BASE         (0U)
+#define BL_STAMP              (uint32_t)(0xCAFA1500)
+#define BL_APP_BANK_1         (uint32_t)(FLASH_BANK1_BASE + BL_FLASH_SIZE)
+#define BL_APP_BANK_2         (uint32_t)(FLASH_BANK2_BASE)
+#define BL_APP_BANK_SIZE_1    (uint32_t)(0x)
+#define BL_APP_BANK_SIZE_2    (uint32_t)(0x1EE000U)
+#define BL_FLASH_PROGRAM_SIZE (32)
 
 typedef enum{
 	BL_STATE_FAULT,
@@ -48,15 +51,20 @@ typedef enum{
 	BL_STATE_FW_COMPLETE,
 }BL_State_e;
 
+typedef struct{
+	uint32_t    address;
+	uint8_t     packet[BL_PROGRAM_SIZE];
+	uint8_t     pIndex;
+}BL_Firmware_t;
+
 void bootLaunch(void);
 void bootTask(void);
-
 void bootSync(void);
 void bootFirmwareInit(void);
 void bootFirmwareUpdate(void);
 int8_t bootFirmwareErase(void);
-int8_t bootLoad(uint8_t* payload, uint8_t len);
-
+int8_t bootLoad256(uint8_t* payload, uint8_t len, uint32_t fwAddress);
+void bootFault(void);
 int8_t bootGetStamp(void);
 void bootSetStamp(void);
 void bootJumpApp(void);

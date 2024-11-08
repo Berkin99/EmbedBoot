@@ -2,9 +2,9 @@
 
 ## COM Packets
 
-### Packet Max 32 Byte
+### Packet Max 20 Byte
 
-    1     1     1        28        1  
+    1     1     1        16        1  
  +-----+-----+-----+============+-----+
  | STA | TYP | LEN |  Payload   | CRC |
  +-----+-----+-----+============+-----+

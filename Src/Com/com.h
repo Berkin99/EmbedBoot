@@ -42,10 +42,14 @@
 #define COM_FWP         0x46    /* Firmware Packet */
 #define COM_FWE         0x45    /* Firmware End Command */
 
+#define COM_PACKET_PAYLOAD_SIZE (16)
+#define COM_PACKET_SIZE         (COM_PACKET_PAYLOAD_SIZE + 4)
+
 typedef struct{
+    uint8_t start;
     uint8_t type;
     uint8_t len;
-    uint8_t payload[28];
+    uint8_t payload[16];
     uint8_t crc;
 }comPacket_t;
 

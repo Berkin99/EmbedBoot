@@ -37,8 +37,9 @@
 #include "com.h"
 
 static BL_State_e  state;
-static uint32_t    fwIndex;
+static BL_Firmware_t firmware;
 static comPacket_t rxPacket;
+static uint8_t 	   rxCounter;
 
 void bootLaunch(void){
 	uartInit();
@@ -49,9 +50,11 @@ void bootLaunch(void){
 		delay(50);
 	}
 
+	firmware.address = BL_FLASH_BASE;
+	firmware.pIndex = 0;
+
 	/* Check GPIO Pin for HIGH */
 	state = BL_STATE_SYNC;
-	fwIndex = BL_APPLICATION_BASE;
 
 	while(1){
 		bootTask();
@@ -59,7 +62,6 @@ void bootLaunch(void){
 }
 
 void bootTask(void){
-
 	switch (state) {
 		case BL_STATE_FAULT:     bootFault(); break;
 		case BL_STATE_SYNC:      bootSync(); break;
@@ -83,7 +85,6 @@ void bootFirmwareInit(void){
 	if(rxPacket.type == COM_IDD && *(uint16_t*)rxPacket.payload == DEVICE_ID){
 		/* Erase all Flash Sectors */
 		if(bootFirmwareErase() == OK){
-			fwIndex = 0;
 			state = BL_STATE_FW_UPDATE;
 			comWriteCmd(COM_ACK);
 		}
@@ -104,7 +105,26 @@ void bootFirmwareUpdate(void){
 		case COM_FWE:
 			state = BL_STATE_FW_COMPLETE; break;
 		case COM_FWP:
-			bootLoad(rxPacket.payload, rxPacket.len); break;
+			rxCounter = 0;
+			while(rxCounter < COM_PACKET_PAYLOAD_SIZE){
+
+				firmware.packet[firmware.pIndex] = rxPacket.payload[rxCounter];
+				rxCounter++;
+				firmware.pIndex++;
+
+				if(firmware.pIndex == BL_FLASH_PROGRAM_SIZE){
+					if(bootLoad256(firmware.packet, 1, firmware.address) != OK){
+						state = BL_STATE_FAULT;
+						comWriteCmd(COM_ERR);
+						return;
+					}
+					firmware.address += 32;
+					firmware.pIndex = 0;
+				}
+
+			}
+			break;
+
 		default:
 			comWriteCmd(COM_NAK); return; break;
 	}
@@ -118,10 +138,11 @@ int8_t bootFirmwareErase(void){
 
     if(HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
 
+    /* ERASE BANK 1 */
     EraseInitStruct.TypeErase = FLASH_TYPEERASE_SECTORS;
-    EraseInitStruct.Banks = FLASH_BANK_1;               /* Bank 1 */
-    EraseInitStruct.Sector = FLASH_SECTOR_1;            /* Start sector to be erased. */
-    EraseInitStruct.NbSectors = FLASH_SECTOR_TOTAL - 1; /* Number of sectors to be erased. */
+    EraseInitStruct.Banks = FLASH_BANK_1;                /* Bank 1 */
+    EraseInitStruct.Sector = FLASH_SECTOR_1;             /* Start sector to be erased. */
+    EraseInitStruct.NbSectors = FLASH_SECTOR_TOTAL - 1;  /* Number of sectors to be erased. */
     EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
 
     if (HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError) != HAL_OK) {
@@ -129,6 +150,7 @@ int8_t bootFirmwareErase(void){
         return E_ERROR;
     }
 
+    /* ERASE BANK 2 */
     EraseInitStruct.Banks = FLASH_BANK_2;
     EraseInitStruct.Sector = FLASH_SECTOR_0;  /* First Sector */
     EraseInitStruct.NbSectors = 4; 			  /* Total number of sectors in Bank 2. */
@@ -142,18 +164,32 @@ int8_t bootFirmwareErase(void){
     return OK;
 }
 
-int8_t bootLoad(uint8_t* payload, uint8_t len){
+int8_t bootLoad256(uint8_t* payload, uint8_t len, uint32_t fwAddress){
 
-	if(HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
+	/* Erase before write anything. */
+    if (HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
 
-	__IO uint32_t* firmware = (__IO uint32_t*)fwIndex;
+    for (uint8_t i = 0; i < len; i++) {
+        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, fwAddress, (uint32_t)(payload)) != HAL_OK) {
+            HAL_FLASH_Lock();
+            return E_ERROR;
+        }
+        payload   += 32; /* 32 Bytes Skipped */
+        fwAddress += 32; /* 32 Bytes Writed */
+    }
 
+    HAL_FLASH_Lock();
 
-	HAL_FLASH_Lock();
-	fwIndex += len;
     return OK;
 }
 
+void bootFault(void){
+	HAL_FLASH_Lock();
+	while(1){
+		pinToggle(LED1_PIN);
+		delay(500);
+	}
+}
 
 int8_t bootGetStamp(void){
 	uint32_t stamp = *(__IO uint32_t*)BL_STAMP_BASE;
@@ -161,19 +197,17 @@ int8_t bootGetStamp(void){
 	return E_NOT_FOUND;
 }
 
-/* Preerase Needed */
 void bootSetStamp(void){
-	HAL_FLASH_Unlock();
-	__IO uint32_t* pStamp = (__IO uint32_t*)BL_STAMP_BASE;
-	*pStamp = BL_STAMP;
-	HAL_FLASH_Lock();
+	/* Preerase Needed ! */
+	uint32_t payload[8] = { BL_STAMP }; /* Other 7 Bytes are trash */
+	bootLoad256((uint8_t *)payload, 1, BL_STAMP_BASE);
 }
 
 void bootJumpApp(void){
 	if(bootGetStamp() != OK) return;
 	typedef void(*void_t)(void);
-	uint32_t jumpAddr = *(uint32_t*)(BL_APPLICATION_BASE + 4); /* Reset Handler */
+	uint32_t jumpAddr = *(uint32_t*)(BL_APPLICATION_BASE + 4); /* ARM Cortex Reset Handler */
 	void_t mainapp = (void_t)jumpAddr;
-	__set_MSP(*(__IO uint32_t*)BL_APPLICATION_BASE);	/* Stack Pointer */
-	mainapp();
+	__set_MSP(*(__IO uint32_t*)BL_APPLICATION_BASE);	       /* Stack Pointer */
+	mainapp(); 												   /* Application Start */
 }

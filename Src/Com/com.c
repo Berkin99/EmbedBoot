@@ -33,7 +33,7 @@
 #include "uart.h"
 
 comPacket_t comNewPacket(uint8_t type, uint8_t len, uint8_t* pBuf){
-	comPacket_t pk = {.type = type,.len = len};
+	comPacket_t pk = {.start = COM_STA, .type = type,.len = len};
 	memcpy(pk.payload, pBuf, len);
 	return pk;
 }
@@ -49,12 +49,12 @@ comPacket_t comNewCommand(uint8_t cmd){
 /* Configured for UART */
 int8_t comReadPacket(comPacket_t* packet){
 	int8_t rslt;
-	uint8_t start = 0;
+	packet->start = 0;
 
-	uartRead(&COM_UART, &start, 1);
+	uartRead(&COM_UART, &packet->start, 1);
 	if(start != COM_STA) return E_NOT_FOUND;
-	rslt  = uartRead(&COM_UART, &packet->type, 1);
-	rslt |= uartRead(&COM_UART, &packet->len, 1);
+
+	rslt  = uartRead(&COM_UART, &packet->type, 2);
 	if(packet->len > 0) rslt |= uartRead(&COM_UART, packet->payload, packet->len);
 	rslt |= uartRead(&COM_UART, &packet->crc, 1);
 
@@ -65,11 +65,8 @@ int8_t comReadPacket(comPacket_t* packet){
 /* Configured for UART */
 int8_t comWritePacket(comPacket_t* packet){
 	int8_t rslt;
-	uint8_t start = COM_STA;
 
-	rslt  = uartWrite(&COM_UART, &start, 1);
-	rslt |= uartWrite(&COM_UART, &packet->type, 1);
-	rslt |= uartWrite(&COM_UART, &packet->len, 1);
+	rslt = uartWrite(&COM_UART, (uint8_t*)&packet, 3);
 	if(packet->len > 0) rslt |= uartWrite(&COM_UART, packet->payload, packet->len);
 	packet->crc = comCrc(packet->payload, packet->len);
 	rslt |= uartWrite(&COM_UART, &packet->crc, 1);
