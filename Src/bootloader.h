@@ -53,7 +53,7 @@ typedef enum{
 
 typedef struct{
 	uint32_t    address;
-	uint8_t     packet[BL_PROGRAM_SIZE];
+	uint8_t     packet[BL_FLASH_PROGRAM_SIZE];
 	uint8_t     pIndex;
 }BL_Firmware_t;
 

@@ -39,39 +39,44 @@
 static BL_State_e  state;
 static BL_Firmware_t firmware;
 static comPacket_t rxPacket;
-static uint8_t 	   rxCounter;
+static uint8_t 	   rxIndex;
 
 void bootLaunch(void){
 	uartInit();
 
+	/* Launch Feeback */
 	uint8_t i = 0;
 	while(i++ < 8){
 		pinToggle(LED1_PIN);
 		delay(50);
 	}
 
+	/* Initialize Variables */
 	firmware.address = BL_FLASH_BASE;
 	firmware.pIndex = 0;
 
 	/* Check GPIO Pin for HIGH */
 	state = BL_STATE_SYNC;
 
-	while(1){
-		bootTask();
-	}
+	bootTask();
+
 }
 
 void bootTask(void){
-	switch (state) {
-		case BL_STATE_FAULT:     bootFault(); break;
-		case BL_STATE_SYNC:      bootSync(); break;
-		case BL_STATE_FW_INIT:   bootFirmwareInit(); break;
-		case BL_STATE_FW_UPDATE: bootFirmwareUpdate(); break;
-		case BL_STATE_FW_COMPLETE: default: bootJumpApp(); break;
+	while(1){
+		switch (state) {
+			case BL_STATE_FAULT:       bootFault(); break;
+			case BL_STATE_SYNC:        bootSync(); break;
+			case BL_STATE_FW_INIT:     bootFirmwareInit(); break;
+			case BL_STATE_FW_UPDATE:   bootFirmwareUpdate(); break;
+			case BL_STATE_FW_COMPLETE: bootJumpApp(); break;
+			default: break;
+		}
 	}
 }
 
 void bootSync(void){
+	/* Wait Synchronize Command */
 	while(comReadCmd(COM_SYC) != OK);
 	comWriteCmd(COM_ACK);
 	state = BL_STATE_FW_INIT;
@@ -105,11 +110,11 @@ void bootFirmwareUpdate(void){
 		case COM_FWE:
 			state = BL_STATE_FW_COMPLETE; break;
 		case COM_FWP:
-			rxCounter = 0;
-			while(rxCounter < COM_PACKET_PAYLOAD_SIZE){
+			rxIndex = 0;
+			while(rxIndex < COM_PACKET_PAYLOAD_SIZE){
 
-				firmware.packet[firmware.pIndex] = rxPacket.payload[rxCounter];
-				rxCounter++;
+				firmware.packet[firmware.pIndex] = rxPacket.payload[rxIndex];
+				rxIndex++;
 				firmware.pIndex++;
 
 				if(firmware.pIndex == BL_FLASH_PROGRAM_SIZE){
@@ -206,8 +211,8 @@ void bootSetStamp(void){
 void bootJumpApp(void){
 	if(bootGetStamp() != OK) return;
 	typedef void(*void_t)(void);
-	uint32_t jumpAddr = *(uint32_t*)(BL_APPLICATION_BASE + 4); /* ARM Cortex Reset Handler */
+	uint32_t jumpAddr = *(uint32_t*)(BL_FLASH_BASE + 4);       /* ARM Cortex Reset Handler */
 	void_t mainapp = (void_t)jumpAddr;
-	__set_MSP(*(__IO uint32_t*)BL_APPLICATION_BASE);	       /* Stack Pointer */
+	__set_MSP(*(__IO uint32_t*)BL_FLASH_BASE);	               /* Stack Pointer */
 	mainapp(); 												   /* Application Start */
 }
