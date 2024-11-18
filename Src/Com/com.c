@@ -32,32 +32,45 @@
 #include "com.h"
 #include "uart.h"
 
-comPacket_t comNewPacket(uint8_t type, uint8_t len, uint8_t* pBuf){
-	comPacket_t pk = {.start = COM_STA, .type = type,.len = len};
-	memcpy(pk.payload, pBuf, len);
+comPacket_t comNewPacket(uint8_t type, uint8_t* payload, uint8_t len){
+	comPacket_t pk = {
+			.start = COM_STA,
+			.type = type,
+			.len = len
+	};
+	memcpy(pk.payload, payload, len);
+	pk.crc = comCrc(pk.payload, len);
 	return pk;
 }
 
 comPacket_t comNewCommand(uint8_t cmd){
 	comPacket_t pk = {
+		.start = COM_STA,
 		.type = cmd,
-		.len = 0
+		.len = 0,
 	};
+	pk.crc = comCrc(pk.payload, len);
 	return pk;
 }
 
-/* Configured for UART */
+/* Configured for Testing : UART */
 int8_t comReadPacket(comPacket_t* packet){
 	int8_t rslt;
-	packet->start = 0;
 
-	uartRead(&COM_UART, &packet->start, 1);
-	if(start != COM_STA) return E_NOT_FOUND;
+	/* Start Byte */
+	rslt = uartRead(&COM_UART, &packet->start, 1);
+	if(packet->start != COM_STA) return E_NOT_FOUND; /* No Start Byte */
 
-	rslt  = uartRead(&COM_UART, &packet->type, 2);
+	/* Type Byte */
+	rslt |= uartRead(&COM_UART, &packet->type, 2);
+
+	/* Payload & Len */
 	if(packet->len > 0) rslt |= uartRead(&COM_UART, packet->payload, packet->len);
+
+	/* Crc */
 	rslt |= uartRead(&COM_UART, &packet->crc, 1);
 
+	/* Crc Control */
 	if(packet->crc != comCrc(packet->payload, packet->len)) return E_CONF_FAIL;
 	return rslt;
 }
@@ -66,10 +79,14 @@ int8_t comReadPacket(comPacket_t* packet){
 int8_t comWritePacket(comPacket_t* packet){
 	int8_t rslt;
 
-	rslt = uartWrite(&COM_UART, (uint8_t*)&packet, 3);
-	if(packet->len > 0) rslt |= uartWrite(&COM_UART, packet->payload, packet->len);
-	packet->crc = comCrc(packet->payload, packet->len);
-	rslt |= uartWrite(&COM_UART, &packet->crc, 1);
+	/* Normalize the data */
+	uint8_t buffer[COM_PACKET_SIZE];
+	memcpy(buffer, &packet, 3);
+	if(packet->len > 0) memcpy(&(buffer[3]), packet->payload, packet->len);
+	buffer[3 + packet->len] = packet->crc;
+
+	/* Send with one write */
+	rslt = uartWrite(&COM_UART, buffer, 4 + packet->len);
 
 	return rslt;
 }
@@ -89,12 +106,12 @@ int8_t comFReadPacket(comPacket_t* packet, uint8_t ack){
 int8_t comFWritePacket(comPacket_t* packet){
 	int8_t rslt;
 	uint8_t retry = 0;
-	while(retry++ < 3){ /* Send packet until receive ACK */
+	while(retry++ < 3){                   /* Send packet until receive ACK */
 		rslt = comWritePacket(packet);
-		if(rslt != OK) break; /* Hardware problem */
+		if(rslt != OK) break;             /* Hardware problem */
 		rslt = comReadCmd(COM_ACK);
 		if(rslt == E_NOT_FOUND) continue; /* Retry if ACK not found */
-		break; /* Received ACK or Hardware problem */
+		break;                            /* Received ACK or Hardware problem */
 	}
 	return rslt;
 }
