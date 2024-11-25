@@ -33,28 +33,30 @@
 #include <stdint.h>
 #include "stm32h7xx.h"
 
+#define BL_BOOT_PIN			  PB1
 #define BL_FLASH_BASE         (FLASH_BANK1_BASE)
 #define BL_FLASH_SIZE         (FLASH_SECTOR_SIZE)
 #define BL_STAMP_BASE         (0U)
 #define BL_STAMP              (uint32_t)(0xCAFA1500)
-#define BL_APP_BANK_1         (uint32_t)(FLASH_BANK1_BASE + BL_FLASH_SIZE)
-#define BL_APP_BANK_2         (uint32_t)(FLASH_BANK2_BASE)
-#define BL_APP_BANK_SIZE_1    (uint32_t)(0x)
-#define BL_APP_BANK_SIZE_2    (uint32_t)(0x1EE000U)
-#define BL_FLASH_PROGRAM_SIZE (32)
+#define BL_APP_FLASH_1        (uint32_t)(FLASH_BANK1_BASE + BL_FLASH_SIZE)
+#define BL_APP_FLASH_2        (uint32_t)(FLASH_BANK2_BASE)
+#define BL_APP_FLASH_SIZE_1   (uint32_t)(FLASH_BANK_SIZE - BL_FLASH_SIZE)
+#define BL_APP_FLASH_SIZE_2   (uint32_t)(FLASH_BANK_SIZE)
+#define BL_FLASH_MAX_ADDRESS  (uint32_t)(FLASH_BANK2_BASE + BL_APP_BANK_SIZE_2)
+#define BL_FLASH_PACKET_SIZE  (32)
 
 typedef enum{
 	BL_STATE_FAULT,
-	BL_STATE_SYNC,
 	BL_STATE_FW_INIT,
 	BL_STATE_FW_UPDATE,
 	BL_STATE_FW_COMPLETE,
+	BL_STATE_APPLICATION,
 }BL_State_e;
 
 typedef struct{
-	uint32_t    address;
-	uint8_t     packet[BL_FLASH_PROGRAM_SIZE];
+	uint32_t    address; /* Firmware Address */
 	uint8_t     pIndex;
+	uint8_t     packet[BL_FLASH_PACKET_SIZE]; /* Flash it once */
 }BL_Firmware_t;
 
 void bootLaunch(void);

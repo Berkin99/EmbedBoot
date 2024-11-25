@@ -36,15 +36,16 @@
 #include "bootloader.h"
 #include "com.h"
 
-static BL_State_e  state;
+static BL_State_e    state;
 static BL_Firmware_t firmware;
-static comPacket_t rxPacket;
-static uint8_t 	   rxIndex;
+static comPacket_t   rxPacket;
+static uint8_t 	     rxIndex;
 
 void bootLaunch(void){
+	/* Com Module Init */
 	uartInit();
 
-	/* Launch Feeback */
+	/* Launch User Feedback */
 	uint8_t i = 0;
 	while(i++ < 8){
 		pinToggle(LED1_PIN);
@@ -53,91 +54,98 @@ void bootLaunch(void){
 
 	/* Initialize Variables */
 	firmware.address = BL_FLASH_BASE;
-	firmware.pIndex = 0;
+	firmware.pIndex  = 0;
 
-	/* Check GPIO Pin for HIGH */
-	state = BL_STATE_SYNC;
+	/* Boot Mode Selection */
+	if(!pinRead(BL_BOOT_PIN)) state = BL_STATE_APPLICATION; /* APPLICATION MODE */
+	else state = BL_STATE_FW_INIT;
 
 	bootTask();
-
 }
 
+/* Boot Mode COM Slave */
 void bootTask(void){
+
 	while(1){
+
+		while(comReadF(&rxPacket, 0) != OK); /* Infinite Read Waiting */
+
+		comPacketHandler(&rxPacket);
+
 		switch (state) {
 			case BL_STATE_FAULT:       bootFault(); break;
-			case BL_STATE_SYNC:        bootSync(); break;
 			case BL_STATE_FW_INIT:     bootFirmwareInit(); break;
 			case BL_STATE_FW_UPDATE:   bootFirmwareUpdate(); break;
-			case BL_STATE_FW_COMPLETE: bootJumpApp(); break;
+			case BL_STATE_FW_COMPLETE: bootJumpApp(); break; /* Warning : Should has Firmware Control System */
+			case BL_STATE_APPLICATION: bootJumpApp(); break;
 			default: break;
 		}
 	}
 }
 
-void bootSync(void){
-	/* Wait Synchronize Command */
-	while(comReadCmd(COM_SYC) != OK);
-	comWriteCmd(COM_ACK);
-	state = BL_STATE_FW_INIT;
-}
-
 void bootFirmwareInit(void){
-	if(comFReadPacket(&rxPacket, 0) != OK){
-		state = BL_STATE_FAULT; return;
+	/* FW_INIT State only waits Firmware ID */
+	if(rxPacket.type != COM_FID) return;
+
+	if(*(uint16_t*)rxPacket.payload != DEVICE_ID){
+		/* False Firmware ID */
+		comWriteCmd(COM_ERR);
+		return;
 	}
 
-	if(rxPacket.type == COM_IDD && *(uint16_t*)rxPacket.payload == DEVICE_ID){
-		/* Erase all Flash Sectors */
-		if(bootFirmwareErase() == OK){
-			state = BL_STATE_FW_UPDATE;
-			comWriteCmd(COM_ACK);
-		}
-		else{
-			state = BL_STATE_FAULT;
-			comWriteCmd(COM_ERR);
-		}
+	/* Erase all Flash Sectors */
+	if(bootFirmwareErase() != OK){
+		/* Firmware Erase Fault : Fault State */
+		state = BL_STATE_FAULT;
+		comWriteCmd(COM_ERR);
+		return;
 	}
-	else comWriteCmd(COM_ERR);
+
+	state = BL_STATE_FW_UPDATE; /* Next State */
+	comWriteCmd(COM_ACK);
 }
 
 void bootFirmwareUpdate(void){
-	if(comFReadPacket(&rxPacket, 0) != OK){
-		state = BL_STATE_FAULT; return;
-	}
-
 	switch (rxPacket.type) {
-		case COM_FWE:
-			state = BL_STATE_FW_COMPLETE; break;
-		case COM_FWP:
-			rxIndex = 0;
+		case COM_FWE: state = BL_STATE_FW_COMPLETE; break; /* Firmware End Command : FW completed */
+		case COM_FWP:    /* Firmware Packet */
+			rxIndex = 0; /* Com Packet Index is resetted for every each packet */
+
+			/* While RX packet loaded */
 			while(rxIndex < COM_PACKET_PAYLOAD_SIZE){
-
+				/* Load the data to Firmware buffer */
+				/* Warning: firmware.pIndex should zero at initalization */
 				firmware.packet[firmware.pIndex] = rxPacket.payload[rxIndex];
-				rxIndex++;
-				firmware.pIndex++;
+				rxIndex++;         /* Com Packet */
+				firmware.pIndex++; /* Firmware Loaded */
 
+				 /* If Firmware Packet Filled : Flash time */
 				if(firmware.pIndex == BL_FLASH_PROGRAM_SIZE){
+
+					/* Flash it with bootLoad 256 */
 					if(bootLoad256(firmware.packet, 1, firmware.address) != OK){
 						state = BL_STATE_FAULT;
 						comWriteCmd(COM_ERR);
 						return;
 					}
-					firmware.address += 32;
-					firmware.pIndex = 0;
+					firmware.address += 32; /* Address incremented 32 bytes */
+					firmware.pIndex = 0;    /* Reset the counter */
 				}
-
 			}
 			break;
-
-		default:
-			comWriteCmd(COM_NAK); return; break;
+		default: return; break; /* Undefined State : Do not send ACK */
 	}
-
 	comWriteCmd(COM_ACK);
 }
 
 int8_t bootFirmwareErase(void){
+
+	/*
+	 * Erase Operation Should Protect the Bootloader area.
+	 * -> Bootloader location : FLASH_SECTOR_0
+	 * -> Erase StartSector : FLASH_SECTOR_1
+	 * -> Erase NbSectors   : All (7)
+	 * */
     FLASH_EraseInitTypeDef EraseInitStruct;
     uint32_t SectorError = 0;
 
@@ -171,6 +179,8 @@ int8_t bootFirmwareErase(void){
 
 int8_t bootLoad256(uint8_t* payload, uint8_t len, uint32_t fwAddress){
 
+	if(fwAddress < BL_FLASH_BASE || fwAddress >= BL_FLASH_MAX_ADDRESS) return E_OVERFLOW;
+
 	/* Erase before write anything. */
     if (HAL_FLASH_Unlock() != HAL_OK) return E_ERROR;
 
@@ -184,12 +194,12 @@ int8_t bootLoad256(uint8_t* payload, uint8_t len, uint32_t fwAddress){
     }
 
     HAL_FLASH_Lock();
-
     return OK;
 }
 
 void bootFault(void){
 	HAL_FLASH_Lock();
+	/* Fault User Feedback */
 	while(1){
 		pinToggle(LED1_PIN);
 		delay(500);
@@ -204,15 +214,15 @@ int8_t bootGetStamp(void){
 
 void bootSetStamp(void){
 	/* Preerase Needed ! */
-	uint32_t payload[8] = { BL_STAMP }; /* Other 7 Bytes are trash */
+	uint32_t payload[8] = { BL_STAMP }; /* Used 4 Bytes : Other 28 bytes are trash */
 	bootLoad256((uint8_t *)payload, 1, BL_STAMP_BASE);
 }
 
 void bootJumpApp(void){
 	if(bootGetStamp() != OK) return;
 	typedef void(*void_t)(void);
-	uint32_t jumpAddr = *(uint32_t*)(BL_FLASH_BASE + 4);       /* ARM Cortex Reset Handler */
+	uint32_t jumpAddr = *(uint32_t*)(BL_APP_FLASH_1 + 4);       /* ARM Cortex Reset Handler */
 	void_t mainapp = (void_t)jumpAddr;
-	__set_MSP(*(__IO uint32_t*)BL_FLASH_BASE);	               /* Stack Pointer */
+	__set_MSP(*(__IO uint32_t*)BL_APP_FLASH_1);	               /* Stack Pointer */
 	mainapp(); 												   /* Application Start */
 }

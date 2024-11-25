@@ -33,14 +33,20 @@
 #include <stdint.h>
 #include "sysdefs.h"
 
-#define COM_STA    0x20
-#define COM_SYC    0x21
-#define COM_ACK    0xF0
-#define COM_NAK    0xFF    /* Not Acknowledge */
-#define COM_ERR    0xFE    /* Error */
-#define COM_IDD    0xA0    /* ID Device */
-#define COM_FWP    0x46    /* Firmware Packet */
-#define COM_FWE    0x45    /* Firmware End Command */
+#define COM_STA    0x20    /* Packet Start Byte */
+#define COM_SYC    "SYNC"  /* Sync */
+
+#define COM_ACK    0x22    /* Acknowledge */
+#define COM_NAK    0x23    /* Not Acknowledge */
+#define COM_GET    0x24    /* Read Register + Register */
+#define COM_SET    0x25    /* Write Register + Register + Data */
+#define COM_REQ    0x26    /* Request Last Given Packet */
+#define COM_MSG    0x27    /* String Message */
+
+#define COM_FID    0xF0    /* Firmware ID */
+#define COM_FWP    0xF1    /* Firmware Packet */
+#define COM_FWE    0xF2    /* Firmware End Command */
+#define COM_ERR    0xEE    /* Error */
 
 #define COM_PACKET_PAYLOAD_SIZE (16)
 #define COM_PACKET_SIZE         (COM_PACKET_PAYLOAD_SIZE + 4)
@@ -49,20 +55,20 @@ typedef struct{
     uint8_t start;
     uint8_t type;
     uint8_t len;
-    uint8_t payload[16];
+    uint8_t payload[COM_PACKET_PAYLOAD_SIZE];
     uint8_t crc;
 }comPacket_t;
 
 comPacket_t comNewPacket(uint8_t type, uint8_t* payload, uint8_t len);
 comPacket_t comNewCmd(uint8_t cmd);
-
-int8_t comReadPacket(comPacket_t* packet);
-int8_t comWritePacket(comPacket_t* packet);
-int8_t comFReadPacket(comPacket_t* packet, uint8_t ack);
-int8_t comFWritePacket(comPacket_t* packet);
-int8_t comReadCmd(uint8_t cmd);
-int8_t comWriteCmd(uint8_t cmd);
-
+int8_t  comReadPacket(comPacket_t* packet);
+int8_t  comWritePacket(comPacket_t* packet);
+int8_t  comReadF(comPacket_t* packet, uint8_t ack);
+int8_t  comWriteF(comPacket_t* packet, uint8_t ack);
+int8_t  comWriteCmd(uint8_t cmd);
+int8_t  comWriteMaster(comPacket_t* packet, comPacket_t* pRxPacket, uint8_t response);
 uint8_t comCrc(uint8_t* buffer, uint8_t len);
+
+void comPacketHandler(comPacket_t* packet);
 
 #endif /* COM_H_ */

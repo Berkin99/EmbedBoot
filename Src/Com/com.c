@@ -32,6 +32,9 @@
 #include "com.h"
 #include "uart.h"
 
+static comPacket_t txPacket; /* Stores the last transmitted packet */
+static comPacket_t rxPacket; /* Stores the last readed packet w hanlder */
+
 comPacket_t comNewPacket(uint8_t type, uint8_t* payload, uint8_t len){
 	comPacket_t pk = {
 			.start = COM_STA,
@@ -43,13 +46,13 @@ comPacket_t comNewPacket(uint8_t type, uint8_t* payload, uint8_t len){
 	return pk;
 }
 
-comPacket_t comNewCommand(uint8_t cmd){
+comPacket_t comNewCmd(uint8_t cmd){
 	comPacket_t pk = {
 		.start = COM_STA,
 		.type = cmd,
 		.len = 0,
 	};
-	pk.crc = comCrc(pk.payload, len);
+	pk.crc = comCrc(pk.payload, 0);
 	return pk;
 }
 
@@ -62,10 +65,11 @@ int8_t comReadPacket(comPacket_t* packet){
 	if(packet->start != COM_STA) return E_NOT_FOUND; /* No Start Byte */
 
 	/* Type Byte */
-	rslt |= uartRead(&COM_UART, &packet->type, 2);
+	rslt |= uartRead(&COM_UART, &packet->type, 1);
+	rslt |= uartRead(&COM_UART, &packet->len, 1);
 
-	/* Payload & Len */
-	if(packet->len > 0) rslt |= uartRead(&COM_UART, packet->payload, packet->len);
+	if (packet->len > (COM_PACKET_SIZE - 4)) return E_OVERFLOW;
+	if (packet->len > 0) rslt |= uartRead(&COM_UART, packet->payload, packet->len);
 
 	/* Crc */
 	rslt |= uartRead(&COM_UART, &packet->crc, 1);
@@ -78,10 +82,10 @@ int8_t comReadPacket(comPacket_t* packet){
 /* Configured for UART */
 int8_t comWritePacket(comPacket_t* packet){
 	int8_t rslt;
-
-	/* Normalize the data */
 	uint8_t buffer[COM_PACKET_SIZE];
-	memcpy(buffer, &packet, 3);
+
+	if (packet->len > (COM_PACKET_SIZE - 4)) return E_OVERFLOW;
+	memcpy(buffer, packet, 3);
 	if(packet->len > 0) memcpy(&(buffer[3]), packet->payload, packet->len);
 	buffer[3 + packet->len] = packet->crc;
 
@@ -91,41 +95,29 @@ int8_t comWritePacket(comPacket_t* packet){
 	return rslt;
 }
 
-int8_t comFReadPacket(comPacket_t* packet, uint8_t ack){
+int8_t comReadF(comPacket_t* packet, uint8_t ack){
 	int8_t rslt;
 	uint8_t retry = 0;
-	while(retry++ < 3){ /* Send NAK for each wrong crc */
+	while(retry++ < 3){
 		rslt = comReadPacket(packet);
-		if(rslt != E_CONF_FAIL) break;
-		comWriteCmd(COM_NAK);
+		if(rslt != E_CONF_FAIL) break; /* Error does not caused by CRC calculation : Exit */
+		comWriteCmd(COM_NAK);          /* Send NAK for each wrong crc : Packet Request */
 	}
 	if(rslt == OK && ack) comWriteCmd(COM_ACK);
 	return rslt;
 }
 
-int8_t comFWritePacket(comPacket_t* packet){
-	int8_t rslt;
-	uint8_t retry = 0;
-	while(retry++ < 3){                   /* Send packet until receive ACK */
-		rslt = comWritePacket(packet);
-		if(rslt != OK) break;             /* Hardware problem */
-		rslt = comReadCmd(COM_ACK);
-		if(rslt == E_NOT_FOUND) continue; /* Retry if ACK not found */
-		break;                            /* Received ACK or Hardware problem */
+int8_t comWriteF(comPacket_t* packet, uint8_t ack){
+	txPacket = *packet;
+	if(ack){
+		comPacket_t pk;
+		return comWriteMaster(packet, &pk, COM_ACK);
 	}
-	return rslt;
-}
-
-int8_t comReadCmd(uint8_t cmd){
-	comPacket_t pk;
-	int8_t rslt = comReadPacket(&pk);
-	if(rslt != OK) return rslt;
-	if(pk.type != cmd) return E_NOT_FOUND;
-	return OK;
+	else return comWritePacket(&txPacket);
 }
 
 int8_t comWriteCmd(uint8_t cmd){
-	comPacket_t pk = comNewCommand(cmd);
+	comPacket_t pk = comNewCmd(cmd);
 	return comWritePacket(&pk);
 }
 
@@ -135,10 +127,57 @@ uint8_t comCrc(uint8_t* buffer, uint8_t len){
     for (uint8_t i = 0; i < len; i++) {
         crc ^= buffer[i];
         for (uint8_t j = 0; j < 8; j++) {
-            if (crc & (1U<<7)) crc = (crc << 1) ^ polynomial;
+            if (crc & (1U << 7)) crc = (crc << 1) ^ polynomial;
             else crc <<= 1;
         }
     }
     return crc;
+}
+
+/*
+ * @brief Response waiting write command. Master usecase
+ * Write and wait desired response :
+ * -> NAK : retransmit 3x
+ * -> ACK : exit
+ * -> NoResponse : REQ last packet :
+ * --> Same with transmitted : exit
+ * --> Not same : retransmit, go start
+ * --> NoResponse : exit
+ */
+int8_t comWriteMaster(comPacket_t* packet, comPacket_t* pRxPacket, uint8_t response){
+	int8_t rslt = comWritePacket(packet);
+	if(rslt != OK) return rslt;
+
+	if(response){
+		int8_t retry = 0;
+		while(retry++ < 3){
+			rslt = comReadPacket(pRxPacket);
+			if(rslt == E_CONF_FAIL){
+				comWriteCmd(COM_NAK);
+				continue; /* NAK : retransit */
+			}
+		}
+	}
+
+	return rslt;
+}
+
+/*
+ * @brief Successfully readed packet handler.
+ * It is nescessary to use  this api after  reading.
+ * ReadF function does not use this apriori because
+ * main CMD funcitons does not count as last readed
+ * packet.
+ */
+void comPacketHandler(comPacket_t* packet){
+	switch (packet->type){
+		case COM_ACK: break; /* ACK */
+		case COM_NAK: comWritePacket(&txPacket); break; /* Retransmit last transmitted packet */
+		case COM_GET: break; /* Get Function Handler Needed */
+		case COM_SET: break; /* Set Function Handler Needed */
+		case COM_REQ: comWritePacket(&rxPacket); break; /* Transmit last received packet*/
+		case COM_MSG: break;
+		default : rxPacket = *packet; break; /* Store the last packet */
+	}
 }
 
